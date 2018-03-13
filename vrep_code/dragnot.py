@@ -1,12 +1,15 @@
 import vrep
 import time
+import math
 import numpy as np
 import scipy.linalg as la
 
+Base = np.array([0.3250, 0.1250, 0.8053])
+
 # Pose of end effector at the beginning for forward kinematics
-M = np.array([  [0,0,-1,0.192],
-                [0,1,0,0],
-                [1,0,0,0.692],
+M = np.array([  [0,0,-1, 0.1049 - Base[0] - 0.13],
+                [0,1,0, 0.1326 - Base[1]],
+                [1,0,0, 1.4562 - Base[2]],
                 [0,0,0,1] ])
 
 # Screw axes and positions for forward kinematics
@@ -17,12 +20,12 @@ a = np.array([  [0,0,1],
                 [0,0,1],
                 [-1,0,0] ])
 
-q = np.array([  [0, 0, 0.152],
-                [-0.12, 0, 0.152],
-                [-0.12, 0, 0.396],
-                [-0.027, 0, 0.609],
-                [-0.110, 0, 0.609],
-                [-0.110, 0, 0.692] ])
+q = np.array([  [0.3250 - Base[0], 0, 0.9097 - Base[2]],
+                [0.2133 - Base[0], 0, 0.9141 - Base[2]],
+                [0.2133 - Base[0], 0, 1.11578 - Base[2]],
+                [0.2133 - Base[0], 0, 1.3710 - Base[2]],
+                [0.2127 - Base[0], 0, 1.4553 - Base[2]],
+                [0.2133 - Base[0], 0, 1.4562 - Base[2]] ])
 
 # Close all open connections (just in case)
 vrep.simxFinish(-1)
@@ -33,8 +36,8 @@ if clientID == -1:
     raise Exception('Failed connecting to remote API server')
 
 def turnJoint(joint_handle, angle, joint_num, sleep_time):
-    print(joint_num, angle, sleep_time)
-    # Wait two seconds
+
+    # Wait
     time.sleep(sleep_time)
 
     # Get the current value of the joint variable
@@ -43,10 +46,9 @@ def turnJoint(joint_handle, angle, joint_num, sleep_time):
     # Set the desired value of the joint variable
     vrep.simxSetJointTargetPosition(clientID, joint_handle, theta + angle, vrep.simx_opmode_oneshot)
 
-    time.sleep(2)
+    time.sleep(sleep_time)
 
     theta = getJointVal(joint_handle, joint_num, 'final')
-    return
 
 # Get "handle" to the given joint of robot
 def getHandle(joint_name):
@@ -59,7 +61,7 @@ def getJointVal(joint_handle, joint_num, event):
     result, theta = vrep.simxGetJointPosition(clientID, joint_handle, vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get first joint variable')
-    print(event, 'value of joint variable',joint_num, ': theta', joint_num,' = {:f}'.format(theta))
+    #print(event, 'value of joint variable',joint_num, ': theta', joint_num,' = {:f}'.format(theta))
     return theta
 
 def getScrew(axis, point):
@@ -93,38 +95,48 @@ vrep.simxStartSimulation(clientID, vrep.simx_opmode_oneshot)
 
 # Forward Kinematics ==========================================================
 
-theta = np.array([np.pi/2, 0, 0, 0, 0, 0])
+# User inputted thetas (in degrees)
+# e.g. "0 0 0 0 0 0", "90 45 -45 45 -45 45", ""
+print("FORWARD KINEMATICS")
+print("Input the values of the six joint angles:")
+print("(e.g. 90 0 0 0 0 0)")
+theta = np.array([math.radians(int(x)) for x in input().split()])
+#theta = np.array([np.pi / 4, np.pi / 4, np.pi / 4, np.pi / 4, np.pi / 4, np.pi / 4])
 
 S = np.zeros((6, 6))
 for i in range(6):
     S[i] = getScrew(a[i], q[i])
 
 pose = M
-print('initial pose:', pose)
+print('Initial pose of end effector:\n', pose)
 for i in range(5, -1, -1):
-    print('i=', i, 'theta=', theta[i])
+    #print('i=', i, 'theta=', theta[i])
     bracket_S = getSkewS(S[i])
     pose = np.dot(la.expm(bracket_S * theta[i]), pose)
 
-print(pose)
+print('Predicted final pose of end effector:\n',pose)
 
 predicted_position = pose[0:3, 3]
 vrep.simxSetObjectPosition(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), predicted_position, vrep.simx_opmode_oneshot)
 #vrep.simxSetObjectOrientation(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), predicted_orient, simx_opmode_oneshot)
 
-
+#print(vrep.simxGetObjectPosition(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), vrep.simx_opmode_streaming))
 #===============================Simulation======================================
 
 vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_oneshot)
 
+# Turn all joints
 for i in range(6):
-    turnJoint(joint_handle[i], theta[i], i+1, 2)
+    turnJoint(joint_handle[i], theta[i], i+1, 1)
+    #print(vrep.simxGetObjectPosition(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), vrep.simx_opmode_buffer))
+
 
 vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 0, vrep.simx_opmode_oneshot)
 
 vrep.simxSetIntegerSignal(clientID, 'BaxterGripper', 50, vrep.simx_opmode_oneshot)
 
-time.sleep(4)
+time.sleep(1000)
+
 #===============================================================================
 
 # Stop simulation
