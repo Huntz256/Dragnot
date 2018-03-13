@@ -36,8 +36,6 @@ if clientID == -1:
     raise Exception('Failed connecting to remote API server')
 
 def turnJoint(joint_handle, angle, joint_num, sleep_time):
-
-    # Wait
     time.sleep(sleep_time)
 
     # Get the current value of the joint variable
@@ -81,6 +79,21 @@ def getSkewS(screw):
     matrix_screw = np.concatenate((matrix_top, matrix_bottom), axis = 0)
     return matrix_screw
 
+def rotMatrixToEulerAngles(R) :
+    sy = math.sqrt(R[0,0] * R[0,0] + R[1,0] * R[1,0])
+    singular = sy < 1e-6
+
+    if not singular:
+        x = math.atan2(R[2,1] , R[2,2])
+        y = math.atan2(-R[2,0], sy)
+        z = math.atan2(R[1,0], R[0,0])
+    else:
+        x = math.atan2(-R[1,2], R[1,1])
+        y = math.atan2(-R[2,0], sy)
+        z = 0
+
+    return np.array([x, y, z])
+
 # Get "handles" to all joints of robot
 joint_one_handle = getHandle('UR3_joint1')
 joint_two_handle = getHandle('UR3_joint2')
@@ -117,10 +130,12 @@ for i in range(5, -1, -1):
 print('Predicted final pose of end effector:\n',pose)
 
 predicted_position = pose[0:3, 3]
-vrep.simxSetObjectPosition(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), predicted_position, vrep.simx_opmode_oneshot)
-#vrep.simxSetObjectOrientation(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), predicted_orient, simx_opmode_oneshot)
+predicted_orient = rotMatrixToEulerAngles(pose[0:3, 0:3])
 
-#print(vrep.simxGetObjectPosition(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), vrep.simx_opmode_streaming))
+vrep.simxSetObjectPosition(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), predicted_position, vrep.simx_opmode_oneshot)
+
+vrep.simxSetObjectOrientation(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), predicted_orient, vrep.simx_opmode_oneshot)
+
 #===============================Simulation======================================
 
 vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_oneshot)
@@ -128,9 +143,8 @@ vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_o
 # Turn all joints
 for i in range(6):
     turnJoint(joint_handle[i], theta[i], i+1, 1)
-    #print(vrep.simxGetObjectPosition(clientID, getHandle('Frame_1'), getHandle('UR3_link1_visible'), vrep.simx_opmode_buffer))
 
-
+# Close gripper
 vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 0, vrep.simx_opmode_oneshot)
 
 vrep.simxSetIntegerSignal(clientID, 'BaxterGripper', 50, vrep.simx_opmode_oneshot)
