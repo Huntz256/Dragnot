@@ -12,4 +12,4 @@ This is a WIP project for the class ECE 470. The goal is to create a robot in si
 Make sure you have the prerequisites. Clone this repository. Open the V-Rep simulator, then open the scene file in the simulator. Finally, run the python code in vrep_code/dragnot.py
 
 ## Versioning
-The current version is 0.1.0.
+The current version is 0.2.0.
