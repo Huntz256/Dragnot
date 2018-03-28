@@ -10,7 +10,7 @@ import scipy.linalg as la
 Base = np.array([0.3250, 0.1250, 0.8053])
 
 # Pose of end effector at the beginning
-M = np.array([  [0,0,-1, 0.1049 - Base[0] - 0.13],
+M = np.array([  [0,0,-1, 0.1049 - Base[0]],
                 [0,1,0, 0.1326 - Base[1]],
                 [1,0,0, 1.4562 - Base[2]],
                 [0,0,0,1] ])
@@ -45,12 +45,15 @@ def get_joint_val(joint_handle, joint_num, event):
 def turn_joint(joint_handle, angle, joint_num, sleep_time):
     time.sleep(sleep_time)
     theta = get_joint_val(joint_handle, joint_num, 'initial')
-
-    # Set the desired value of the joint variable
     vrep.simxSetJointTargetPosition(clientID, joint_handle, theta + angle, vrep.simx_opmode_oneshot)
-
     time.sleep(sleep_time)
-    theta = get_joint_val(joint_handle, joint_num, 'final')
+
+# Sets a joint angle
+def set_joint_angle(joint_handle, angle, joint_num, sleep_time):
+    time.sleep(sleep_time)
+    vrep.simxSetJointTargetPosition(clientID, joint_handle, angle, vrep.simx_opmode_oneshot)
+    time.sleep(sleep_time)
+
 
 # Get "handle" to the given joint of robot
 def get_handle(joint_name):
@@ -94,9 +97,13 @@ def rot_matrix_to_euler_angles(R):
 
     return np.array([x, y, z])
 
+def open_gripper(clientID):
+    #print('Opening gripper...\n')
+    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 0, vrep.simx_opmode_blocking)
+
 def close_gripper(clientID):
-    print('Closing gripper...\n')
-    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_oneshot)
+    #print('Closing gripper...\n')
+    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_blocking)
 
 def adjoint(T):
     R = T[:3,:3]
@@ -161,9 +168,28 @@ def get_object_pose(clientID, obj_name):
     result, euler_angles = vrep.simxGetObjectOrientation(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get object orientation')
-    print(position)
-    print(euler_angles)
-    return position
+    #print(position)
+    #print(euler_angles)
+
+    Rx = np.array([ [1, 0, 0],
+                    [0, math.cos(euler_angles[0]), -math.sin(euler_angles[0])],
+                    [0, math.sin(euler_angles[0]), math.cos(euler_angles[0])] ])
+
+    Ry = np.array([ [math.cos(euler_angles[1]),0,math.sin(euler_angles[1])],
+                    [0,1,0],
+                    [-math.sin(euler_angles[1]),0,math.cos(euler_angles[1])] ])
+
+    Rz = np.array([ [math.cos(euler_angles[2]),-math.sin(euler_angles[2]),0],
+                    [math.sin(euler_angles[2]),math.cos(euler_angles[2]),0],
+                    [0,0,1] ])
+
+    R = Rx.dot(Ry).dot(Rz)
+    position = (np.array(position))[:, None]
+    foo_top = np.concatenate((R, position), axis = 1)
+    foo_bottom = np.array([[0,0,0,1]])
+    pose = np.concatenate((foo_top, foo_bottom), axis = 0)
+
+    return pose
 ################################################################################
 # Demos
 ################################################################################
@@ -199,17 +225,17 @@ def forward_kinematics_demo(clientID, joint_handles, S, pose):
 # Returns theta that would produce the given goal pose
 def do_inverse_kinematics(S, M, goal_T1in0):
     # Parameters
-    print('Goal pose:', goal_T1in0)
-    epsilon = 0.001 # Want error to be this small
+    #print('Goal pose:', goal_T1in0)
+    epsilon = 0.1 # Want error to be this small
     k = 1 # Parameter in theta = theta + thetadot * k
-    N = 2000 # Maximum number of loops
+    N = 100 # Maximum number of loops
     mu = 0.1 # Parameter in thetadot equation
 
     # Initial guess for thetas
     theta = np.array([0,0,0,0,0,0])
 
     i = 0
-    print('Finding theta that would produce the wanted pose...')
+    #print('Finding theta that would produce the wanted pose...')
     while True:
         i += 1
         ##print()
@@ -249,7 +275,7 @@ def do_inverse_kinematics(S, M, goal_T1in0):
             break
         if i > N:
             theta = theta[:, None]
-            print('Warning: too many loops.', error)
+            print('Not reachable.', error)
             break
 
     return theta
@@ -258,27 +284,23 @@ def do_inverse_kinematics(S, M, goal_T1in0):
 def inverse_kinematics_demo(clientID, joint_handles, S, M):
     print('INVERSE KINEMATICS DEMO')
 
-    time.sleep(1)
-    position = get_object_pose(clientID, 'Frame_1')
-    '''goal_pose = np.array([ [0,0,-1, 0.1049 - Base[0] - 0.13 - 0.01],
-                            [0,1,0, 0.1326 - Base[1] - 0.02],
-                            [1,0,0, 1.4562 - Base[2] - 0.12],
-                            [0,0,0,1] ])'''
-    goal_pose = np.array([ [0,0,-1, position[0]],
-                            [0,1,0, position[1]],
-                            [1,0,0, position[2]],
-                            [0,0,0,1] ])
+    while True:
+        open_gripper(clientID)
+        time.sleep(2)
+        input("Place block at desired pose and press enter...")
 
-    theta = do_inverse_kinematics(S, M, goal_pose)
+        goal_pose = get_object_pose(clientID, 'Frame_1')
 
-    # Turn all joints
-    for i in range(6):
-        turn_joint(joint_handles[i], theta[i], i+1, 0.2)
+        theta = do_inverse_kinematics(S, M, goal_pose)
 
-    # Close gripper
-    time.sleep(1)
-    close_gripper(clientID)
-    time.sleep(1)
+        # Turn all joints
+        for i in range(6):
+            set_joint_angle(joint_handles[i], theta[i], i+1, 0.1)
+
+        # Close gripper
+        time.sleep(1)
+        close_gripper(clientID)
+        time.sleep(1)
 
     print('END OF INVERSE KINEMATICS DEMO')
 
