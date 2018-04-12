@@ -193,8 +193,7 @@ def get_object_position(clientID, obj_name):
     result, position = vrep.simxGetObjectPosition(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get object position')
-    position = (np.array(position))[:, None]
-    print(position)
+    #print(position)
     return position
 
 # Returns the distance between two 3D points
@@ -205,21 +204,33 @@ def distance_between_points(p_1, p_2):
 def are_spheres_colliding(p_1, p_2, r_1, r_2):
     return distance_between_points(p_1, p_2) <= (r_1 + r_2)
 
-# Get position of robot sphere N (e.g. N = 0 is the base sphere)
+# Get position of robot sphere N (N >= 0)
 # which is initialially at position M (e.g. M = np.array([1, 2, 3]))
 def get_sphere_position(theta, S, M, N):
     e = []
     theta = theta.squeeze()
     b = np.append(M, [1])
+    Q = -1
+
     if N == 0 or N == 1:
         return b
+    elif N >= 2 and N <= 4:
+        Q = 2
+    elif N >= 5 and N <= 7:
+        Q = 3
+    elif N == 8:
+        Q = 4
+    elif N == 9:
+        Q = 5
+    elif N >= 10:
+        Q = 6
 
-    for i in range(1, N):
+    for i in range(1, Q):
         e.append(la.expm(bracket_screw(S[i - 1]) * theta[i - 1]))
 
     e = np.array(e)
     a = np.eye(4)
-    for i in range(1, N):
+    for i in range(1, Q):
         a = a.dot(e[i - 1])
 
     return a.dot(b)
@@ -250,17 +261,24 @@ def place_robot_spheres(S, theta, P_robot):
 #  - r: radii of the spheres
 def is_there_collision(S, theta, P_robot, P_obstacle, R):
     robot_spheres = place_robot_spheres(S, theta, P_robot)
-    #print("robot spheres: ", robot_spheres)
+    #rint("robot spheres: ", robot_spheres)
+    #print(P_obstacle)
     spheres = np.concatenate((robot_spheres, P_obstacle), axis = 0)
     N1 = len(robot_spheres)
     N = N1 + len(P_obstacle)
-    collision = False
+    collision = 0
+    #print(N1, N)
 
+    #print(spheres)
     for i in range(N1):
         for j in range(N):
-            if i != j and are_spheres_colliding(spheres[i], spheres[j], R[i], R[j]):
-                collision = True
-                print('Collision detected between', i, 'and', j)
+            if i != j and i != j + 1 and i != j - 1 and are_spheres_colliding(spheres[i], spheres[j], R[i], R[j]):
+                if i < N1 and j < N1:
+                    #print('Collision detected between', i, 'and', j)
+                    collision = 1
+                else:
+                    collision = 2
+
 
     return collision
 ################################################################################
@@ -379,36 +397,50 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
 
 # Checkpoint 4 demo
 def collision_detection(clientID, joint_handles, S, M):
+    x = [0, 0, 0, 0, 0, 0]
+    for j in range(6):
+        set_joint_angle(joint_handles[j], x[j], j+1, 0.1)
+
     print("Collision Detection Demo")
+
+
     """
     theta = np.array([[0.14681086, 1.98406767, -0.00064404, 0.54813603, 0.95100498,  -1.33427162, 2.60669557, -1.34891807, 1.77823405, -3.09672843,  -0.02926685, 0.06538319, 1.02944042, 1.78123137, -0.57506472,  -2.48259367, -1.39782694, -1.50441594, -2.34545871], [-2.03078957, -0.99122938, -2.06912857, 2.24969724, -3.05278946,  -0.23510077, -1.02996274, -0.67255515, 0.91400064, 2.69267613,  -2.65655371, 2.97569681, -0.02769013, -0.54810102, 2.20572846,  0.16510457, -2.11613474, 0.62390033, -0.56603554], [0.26982448, 2.30632943, 0.65386007, 1.26331468, -0.99607886,  -0.64818991, -1.00560357, -2.61824931, -0.48405106, 2.07967408,  2.91530733, 3.13671940, 1.93572668, -2.94187968, 0.40684878, 0.86576616,  -2.97548753, -2.85172433, -0.89498416], [-1.92279536, -1.95570646, 1.76049020, 0.92634822, -1.25107838,  2.98196387, -1.79457764, 0.92731661, -0.44421990, -1.90669041,  0.95975764, 1.31289794, -2.00683732, -0.66202909, 0.90891259,  1.68811020, 1.21994831, -1.10110543, -1.71950787], [2.22800557, -1.13467547, 1.71732081, -2.29579612, 0.16752419,  0.57231844, -0.66888501, 0.74781408, 3.11460771, -0.70437482,  0.80792863, -3.06603208, -2.96054108, -1.61436450, -0.55830242,  2.52147902, -2.82611088, 0.82129443, -0.23845192], [-1.65343213, -2.68388272, 2.50329400, 0.87124522, 0.95221881,  2.63061332, 1.40595757, -2.45322703, -0.60805465, 1.71865399,  2.69873775, 0.02218775, 3.09683822, 2.14695020, -2.83026278,  -1.54978798, -1.26556948, 3.13080416, 1.93400129]])
     """
-    theta = np.array([[0, 0, 0.1, 0, -0.58787870,  -0.44194958, 1.96679567, -0.50628958, -0.73656183, 3.07307548,  -0.75577025, 2.61955754, -2.98117356, -2.02637222, 2.28347010],
-                      [0, 0, 0, 0, 2.03224449,  -1.60210153, 1.32916788, 0.04697692, 0.93594889, 1.44425167, 0.64014588,  1.90738626, 0.82377931, 1.68504340, -1.27063583],
-                      [3.14, 1.5, 0, 0, -1.53616482,  1.39426828, -1.31211022, 0.72504312, -2.66573670, 1.60842364,  -0.70850489, 1.92804871, 1.66946648, 1.89600887, -3.05891633],
-                      [0, 0, 0, 0, 1.92858218,  -2.39406817, -1.59167495, -2.30805406, 1.86735032, -1.28435563,  0.03837304, -0.98940773, -1.75350804, -0.99173644, 0.63209242],
-                      [0, 0, 0, 0, -0.80217197,  2.83709552, 0.45808503, 0.19727700, -0.20277843, -1.03783602,  -0.74450504, -1.33345165, 1.38693544, 1.32363642, 2.08453226],
-                      [0, 0, 0, 0, 2.94526677,  -2.61141333, -0.70320318, 2.86590535, 1.51860879, 0.94631448,  2.22162506, 1.85177936, 1.44784656, -2.26096654, 1.03104158]])
+    theta = np.array([[0, 0.15, 0.3, 0.45, 0.60, 0.75, 0.9, 1.05, 1.2, 1.35, 1.5,
+    -0.44194958, 1.96679567, -0.50628958, -0.73656183, 3.07307548,  -0.75577025, 2.61955754, -2.98117356, -2.02637222, 2.28347010],
+                      [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1,
+    -0.60210153, 0.32916788, 0.04697692, 0.93594889, 0.44425167, 0.64014588,  0.90738626, 0.82377931, 0.68504340, -0.27063583],
+                      [0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5,
+    1.39426828, -1.31211022, 0.72504312, -2.66573670, 1.60842364,  -0.70850489, 1.92804871, 1.66946648, 1.89600887, -3.05891633],
+                      [0, 0.15, 0.3, 0.45, 0.60, 0.75, 0.9, 1.05, 1.2, 1.35, 1.5,
+    -2.39406817, -1.59167495, -2.30805406, 1.86735032, -1.28435563,  0.03837304, -0.98940773, -1.75350804, -0.99173644, 0.63209242],
+                      [0, 0.15, 0.3, 0.45, 0.60, 0.75, 0.9, 1.05, 1.2, 1.35, 1.5,
+    2.83709552, 0.45808503, 0.19727700, -0.20277843, -1.03783602,  -0.74450504, -1.33345165, 1.38693544, 1.32363642, 2.08453226],
+                      [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    -2.61141333, -0.70320318, 2.86590535, 1.51860879, 0.94631448,  2.22162506, 1.85177936, 1.44784656, -2.26096654, 1.03104158]])
     r = 0.05
 
     # Initial positions of the spheres of the UR3
     P_robot = []
-    P_robot.append([0, 0, 0]) # First sphere always at zero position
-    P_robot.append(get_object_position('Dummy_0'))
-    P_robot.append(get_object_position('Dummy_1'))
-    P_robot.append(get_object_position('Dummy_2'))
-    P_robot.append(get_object_position('Dummy_3'))
-    P_robot.append(get_object_position('Dummy_4'))
-    P_robot.append(get_object_position('Dummy_5'))
-    P_robot.append(get_object_position('Dummy_6'))
-    P_robot.append(get_object_position('Dummy_7'))
-    P_robot.append(get_object_position('Dummy_8'))
-    P_robot.append(get_object_position('Dummy_9'))
-    P_robot.append(get_object_position('Dummy_10'))
-    P_robot.append(get_object_position('Dummy_11'))
+    P_robot.append(get_object_position(clientID, 'Dummy_0'))
+    P_robot.append(get_object_position(clientID, 'Dummy_1'))
+    P_robot.append(get_object_position(clientID, 'Dummy_2'))
+    P_robot.append(get_object_position(clientID, 'Dummy_3'))
+    P_robot.append(get_object_position(clientID, 'Dummy_4'))
+    P_robot.append(get_object_position(clientID, 'Dummy_5'))
+    P_robot.append(get_object_position(clientID, 'Dummy_6'))
+    P_robot.append(get_object_position(clientID, 'Dummy_7'))
+    P_robot.append(get_object_position(clientID, 'Dummy_8'))
+    P_robot.append(get_object_position(clientID, 'Dummy_9'))
+    P_robot.append(get_object_position(clientID, 'Dummy_10'))
+    P_robot.append(get_object_position(clientID, 'Dummy_11'))
 
+    # Inital position of obstacles
     P_obstacle = []
-    P_obstacle.append(np.array(get_object_position('Dummy_12')))
+    P_obstacle.append(get_object_position(clientID, 'Dummy_12'))
+    #print(P_robot)
+    #print(P_obstacle)
 
     r_robot = np.array([[0.075, 0.075, 0.075, 0.075, 0.075, 0.075,
                         0.06, 0.06, 0.06, 0.06, 0.06,
@@ -423,20 +455,27 @@ def collision_detection(clientID, joint_handles, S, M):
 
     theta = theta.transpose()
 
-    x = theta[3]
-    # Turn all joints
-    for i in range(6):
-        set_joint_angle(joint_handles[i], x[i], i+1, 0.1)
+    #print("amitesh")
+    for i in range(len(theta)):
+        print(i)
+        x = theta[i]
+        # Turn all joints
+        for j in range(6):
+            set_joint_angle(joint_handles[j], x[j], j+1, 0.1)
 
-    c = []
-    for i in range(15):
-        if is_there_collision(S, theta[i], P_robot, P_obstacle, R):
-            c += [1]
+        coll = is_there_collision(S, x, P_robot, P_obstacle, R)
+        if coll == 1:
+            print("SELF COLLISION!")
+        elif coll == 2:
+            print("COLLISION WITH OBSTACLE!")
         else:
-            c += [0]
+            print("No collision.")
+        #time.sleep(3)
+        x = [0, 0, 0, 0, 0, 0]
+        for j in range(6):
+            set_joint_angle(joint_handles[j], x[j], j+1, 0.1)
+        #time.sleep(1)
 
-    c = [c]
-    print(c)
 
     return
 
@@ -472,6 +511,8 @@ joint_handles = [joint_one_handle, joint_two_handle, joint_three_handle, joint_f
 S = np.zeros((6, 6))
 for i in range(6):
     S[i] = get_screw(a[i], q[i])
+#print('aaa', S)
+S = S.transpose()
 
 # Checkpoint 2 demo
 #forward_kinematics_demo(clientID, joint_handles, S, M)
@@ -482,6 +523,7 @@ for i in range(6):
 ################################################################################
 #theta = np.array([0,10,20,30,40,50])
 #helper_forward_kinematics(clientID, joint_handles, S, M, theta)
+
 
 collision_detection(clientID, joint_handles, S, M)
 ################################################################################
