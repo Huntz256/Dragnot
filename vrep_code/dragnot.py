@@ -38,7 +38,6 @@ def get_joint_val(joint_handle, joint_num, event):
     result, theta = vrep.simxGetJointPosition(clientID, joint_handle, vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get first joint variable')
-    #print(event, 'value of joint variable',joint_num, ': theta', joint_num,' = {:f}'.format(theta))
     return theta
 
 # Turn a joint by a given angle
@@ -53,7 +52,6 @@ def set_joint_angle(joint_handle, angle, joint_num, sleep_time):
     time.sleep(sleep_time)
     vrep.simxSetJointPosition(clientID, joint_handle, angle, vrep.simx_opmode_oneshot)
     time.sleep(sleep_time)
-
 
 # Get "handle" to the given joint of robot
 def get_handle(joint_name):
@@ -191,6 +189,14 @@ def get_object_pose(clientID, obj_name):
 
     return pose
 
+def get_object_position(clientID, obj_name):
+    result, position = vrep.simxGetObjectPosition(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), vrep.simx_opmode_blocking)
+    if result != vrep.simx_return_ok:
+        raise Exception('could not get object position')
+    position = (np.array(position))[:, None]
+    print(position)
+    return position
+
 # Returns the distance between two 3D points
 def distance_between_points(p_1, p_2):
     return math.sqrt((p_1[0] - p_2[0])**2 + (p_1[1] - p_2[1])**2 + (p_1[2] - p_2[2])**2)
@@ -199,51 +205,63 @@ def distance_between_points(p_1, p_2):
 def are_spheres_colliding(p_1, p_2, r_1, r_2):
     return distance_between_points(p_1, p_2) <= (r_1 + r_2)
 
-# Get position of sphere N which is initialially at position M
-#  N is a integer either 0, 1, 2, 3, 4, or 5
-#  M is a list [x, y, z, 1]
+# Get position of robot sphere N (e.g. N = 0 is the base sphere)
+# which is initialially at position M (e.g. M = np.array([1, 2, 3]))
 def get_sphere_position(theta, S, M, N):
     e = []
-
+    theta = theta.squeeze()
+    b = np.append(M, [1])
     if N == 0 or N == 1:
-        return M
+        return b
 
     for i in range(1, N):
         e.append(la.expm(bracket_screw(S[i - 1]) * theta[i - 1]))
 
     e = np.array(e)
-    ret = np.eye(4)
+    a = np.eye(4)
     for i in range(1, N):
-        ret = ret.dot(e[i - 1])
-    return ret.dot(M)
+        a = a.dot(e[i - 1])
+
+    return a.dot(b)
 
 
-# HW 5.1.3
-# Returns an array sphere_centers where sphere_centers[i] is the center of sphere i
-def place_spheres(S, theta, Z):
-
+# Inputs:
+#  - S: as given by prairielearn
+#  - theta: as given by prairielearn
+#  - P_robot: initial centers of the robot spheres
+# Output: array sphere_centers where sphere_centers[i] is the
+#  center of robot sphere i
+def place_robot_spheres(S, theta, P_robot):
     S = S.transpose()
 
-    # Spheres 0, 1, ..., 7
     sphere_centers = []
-    for i in range(8):
-        x = get_sphere_position(theta, S, Z[i], i)
+    for i in range(len(P_robot)):
+        x = get_sphere_position(theta, S, P_robot[i], i)
         sphere_centers.append(list(x[:3]))
 
     sphere_centers = np.array(sphere_centers)
     return sphere_centers
 
-# HW 5.1.4
-def is_there_collision(S, theta, Z, r):
-    spheres = place_spheres(S, theta, Z)
-    #print(spheres)
-
+# Inputs:
+#  - S: as given by prairielearn
+#  - theta: as given by prairielearn
+#  - P_robot: initial centers of the spheres covering the robot
+#  - P_obstacle: initial centers of the spheres covering the obstacles
+#  - r: radii of the spheres
+def is_there_collision(S, theta, P_robot, P_obstacle, R):
+    robot_spheres = place_robot_spheres(S, theta, P_robot)
+    #print("robot spheres: ", robot_spheres)
+    spheres = np.concatenate((robot_spheres, P_obstacle), axis = 0)
+    N1 = len(robot_spheres)
+    N = N1 + len(P_obstacle)
     collision = False
-    for i in range(8):
-        for j in range(8):
-            if i != j and i != j + 1 and i != j - 1 and i != j + 2 and i != j - 2 and are_spheres_colliding(spheres[i], spheres[j], r, r):
+
+    for i in range(N1):
+        for j in range(N):
+            if i != j and are_spheres_colliding(spheres[i], spheres[j], R[i], R[j]):
                 collision = True
-                print(i, j)
+                print('Collision detected between', i, 'and', j)
+
     return collision
 ################################################################################
 # Demos
@@ -373,18 +391,35 @@ def collision_detection(clientID, joint_handles, S, M):
                       [0, 0, 0, 0, 2.94526677,  -2.61141333, -0.70320318, 2.86590535, 1.51860879, 0.94631448,  2.22162506, 1.85177936, 1.44784656, -2.26096654, 1.03104158]])
     r = 0.05
 
-    # Initial positions of the 8 spheres of the UR3
-    Z = []
-    Z.append([0, 0, 0, 1]) # First sphere always at zero position
+    # Initial positions of the spheres of the UR3
+    P_robot = []
+    P_robot.append([0, 0, 0]) # First sphere always at zero position
+    P_robot.append(get_object_position('Dummy_0'))
+    P_robot.append(get_object_position('Dummy_1'))
+    P_robot.append(get_object_position('Dummy_2'))
+    P_robot.append(get_object_position('Dummy_3'))
+    P_robot.append(get_object_position('Dummy_4'))
+    P_robot.append(get_object_position('Dummy_5'))
+    P_robot.append(get_object_position('Dummy_6'))
+    P_robot.append(get_object_position('Dummy_7'))
+    P_robot.append(get_object_position('Dummy_8'))
+    P_robot.append(get_object_position('Dummy_9'))
+    P_robot.append(get_object_position('Dummy_10'))
+    P_robot.append(get_object_position('Dummy_11'))
 
-    Z.append([0.3250 - Base[0], 0, 0.9097 - Base[2], 1])
-    Z.append([0.2133 - Base[0], 0, 0.9141 - Base[2], 1])
-    Z.append([0.2133 - Base[0], 0, 1.11578 - Base[2], 1])
-    Z.append([0.2133 - Base[0], 0, 1.3710 - Base[2], 1])
-    Z.append([0.2127 - Base[0], 0, 1.4553 - Base[2], 1])
-    Z.append([0.2133 - Base[0], 0, 1.4562 - Base[2], 1])
+    P_obstacle = []
+    P_obstacle.append(np.array(get_object_position('Dummy_12')))
 
-    Z.append([0.1049 - Base[0], 0.1326 - Base[1], 1.4562 - Base[2], 1])
+    r_robot = np.array([[0.075, 0.075, 0.075, 0.075, 0.075, 0.075,
+                        0.06, 0.06, 0.06, 0.06, 0.06,
+                        0.05]])
+
+    r_obstacle = np.array([[0.15]])
+
+    # Radii of all the spheres
+    R = np.concatenate((r_robot, r_obstacle), axis = 1)
+    R = R.squeeze()
+    #print("R: ", R)
 
     theta = theta.transpose()
 
@@ -395,7 +430,7 @@ def collision_detection(clientID, joint_handles, S, M):
 
     c = []
     for i in range(15):
-        if is_there_collision(S, theta[i], Z, r):
+        if is_there_collision(S, theta[i], P_robot, P_obstacle, R):
             c += [1]
         else:
             c += [0]
