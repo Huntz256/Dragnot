@@ -15,6 +15,7 @@ M = np.array([  [0,0,-1, 0.1049 - Base[0]],
                 [1,0,0, 1.4562 - Base[2]],
                 [0,0,0,1] ])
 
+
 # Screw axes and positions
 a = np.array([  [0,0,1],
                 [-1,0,0],
@@ -331,6 +332,37 @@ def is_there_collision_in_line(S, theta_start, theta_end, P_robot, P_obstacle, R
             return True
 
     return False
+
+class Node():
+    def __init__(self):
+        self.parent = []
+        self.data = None
+
+# Returns a random sample point in free space
+#   N is the dimension of the C-space
+def get_theta_sample(S, P_robot, P_obstacle, R, N):
+    sample = Node()
+    while True:
+        sample_data = np.array([np.random.uniform(-math.pi, math.pi) for _ in range(N)])
+        if not is_there_collision(S, sample_data, P_robot, P_obstacle, R):
+            sample.data = sample_data.tolist()
+            return sample
+
+# Returns distance between two nodes in C-space
+#  a and b are nodes with data that are lists
+def get_distance(a, b):
+    return np.linalg.norm(np.array(a.data) - np.array(b.data))
+
+def get_closest_node_in_tree(the_node, tree):
+    closest_distance = math.inf
+    closest = None
+    for node in tree:
+        distance = get_distance(the_node, node)
+        if distance < closest_distance:
+            closest_distance = distance
+            closest = node
+    return closest
+
 ################################################################################
 # Demos
 ################################################################################
@@ -530,13 +562,10 @@ def checking_collision_in_line(clientID, joint_handles, S, M, P_robot, P_obstacl
         input("Press enter to continue...")
         print()
 
-
 # Checkpoint 5 demo
 def motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle):
-
     print("Motion Planning Demo")
     theta_start = np.array([[0], [0], [0], [0], [0], [0]])
-    #theta_goal = np.array([[0.24], [1.01], [-1.32], [0.94], [3.09], [0.93]])
     theta_goal = np.array([[0.24], [0.01], [-0.32], [0.94], [1.09], [0.93]])
 
     # Put robot in start configuration
@@ -546,12 +575,15 @@ def motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot,
     R = np.concatenate((r_robot, r_obstacle), axis = 1)
     R = R.squeeze()
 
-    if is_there_collision_in_line(S, theta_start, theta_goal, P_robot, P_obstacle, R):
-        print("Collision detected in line from theta_start to theta_goal")
-    else:
-        print("No collision detected in line from theta_start to theta_goal")
+    #position_ball = np.array([+2.3000e-02 - Base[0], +5.8900e-01 - Base[1], +1.0250e+00 - Base[2]])
+    goal_pose = get_object_pose(clientID, 'Target')
+    print(goal_pose)
+    theta = do_inverse_kinematics(S, M, goal_pose)
+    print(theta)
+    place_robot_in_configuration(joint_handles, theta, 0.1)
+    #smooth_place_robot_in_configuration(joint_handles, theta_start, theta)
 
-    place_robot_in_configuration(joint_handles, theta_goal, 0.01)
+    #smooth_place_robot_in_configuration(joint_handles, theta, theta_start)
 
 
 ################################################################################
@@ -625,8 +657,8 @@ r_obstacle = np.array([[0.15]])
 #collision_detection(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
 
 # Checkpoint 5 demo
-checking_collision_in_line(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
-#motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
+#checking_collision_in_line(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
+motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
 
 # Stop simulation
 #vrep.simxStopSimulation(clientID, vrep.simx_opmode_oneshot)
