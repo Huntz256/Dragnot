@@ -30,35 +30,132 @@ q = np.array([  [-2.98023224e-08, -7.45058060e-08, 1.04472935e-01],
                 [-1.11665905e-01, -5.66244125e-07, 6.51123405e-01]])
 
 ################################################################################
-# Helper functions
+# Helper functions that interface with VREP
 ################################################################################
 
 # Get the current value of the joint variable
-def get_joint_val(joint_handle, joint_num, event):
+def get_joint_val(clientID, joint_handle):
     result, theta = vrep.simxGetJointPosition(clientID, joint_handle, vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get first joint variable')
     return theta
 
 # Turn a joint by a given angle
-def turn_joint(joint_handle, angle, joint_num, sleep_time):
+def turn_joint(clientID, joint_handle, angle, joint_num, sleep_time):
     time.sleep(sleep_time)
-    theta = get_joint_val(joint_handle, joint_num, 'initial')
+    theta = get_joint_val(clientID, joint_handle)
     vrep.simxSetJointPosition(clientID, joint_handle, theta + angle, vrep.simx_opmode_oneshot)
     time.sleep(sleep_time)
 
 # Sets a joint angle
-def set_joint_angle(joint_handle, angle, joint_num, sleep_time):
+def set_joint_angle(clientID, joint_handle, angle, joint_num, sleep_time):
     time.sleep(sleep_time)
     vrep.simxSetJointPosition(clientID, joint_handle, angle, vrep.simx_opmode_oneshot)
     time.sleep(sleep_time)
 
+# Returns the current robot configuration
+def get_robot_configuration(clientID, joint_handles):
+    current_configuration = []
+    for j in range(6):
+        current_configuration.append(get_joint_val(clientID, joint_handles[j]))
+    return current_configuration
+
+# Sets a robot configuration by setting all joint angles to the
+#  given configuration
+def place_robot_in_configuration(clientID, joint_handles, configuration, delay):
+    time.sleep(delay)
+    vrep.simxPauseCommunication(clientID, True)
+    for j in range(6):
+        vrep.simxSetJointPosition(clientID, joint_handles[j], configuration[j], vrep.simx_opmode_oneshot)
+    vrep.simxPauseCommunication(clientID, False)
+    time.sleep(delay)
+
+# Sets a robot configuration by setting all joint angles to the
+#   configurations on a straight-line path to the given configuration
+def smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta_end):
+    N = 20; theta = []; slopes = []
+    for i in range(len(theta_start)):
+        slopes.append((theta_end[i] - theta_start[i]) / N)
+    for i in range(N):
+        next_theta = []
+        for j in range(len(theta_start)):
+            next_theta.append(slopes[j] * i + theta_start[j])
+        theta.append(next_theta)
+    theta.append(theta_end)
+    theta = np.array(theta)
+
+    for i in range(len(theta)):
+        the_theta = theta[i]
+        vrep.simxPauseCommunication(clientID, True)
+        for j in range(6):
+            vrep.simxSetJointPosition(clientID, joint_handles[j], the_theta[j], vrep.simx_opmode_oneshot)
+        vrep.simxPauseCommunication(clientID, False)
+        time.sleep(0.05)
+
 # Get "handle" to the given joint of robot
-def get_handle(joint_name):
+def get_handle(clientID, joint_name):
     result, joint_handle = vrep.simxGetObjectHandle(clientID, joint_name, vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get object handle for first joint')
     return joint_handle
+
+# Opens the baxer gripper
+def open_gripper(clientID):
+    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 0, vrep.simx_opmode_blocking)
+
+# Closes the baxer gripper
+def close_gripper(clientID):
+    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_blocking)
+
+# Sets the position and orientation of an object relative to the base
+def set_object_pose(clientID, pose, obj_name):
+    predicted_position = pose[0:3, 3]
+    predicted_orient = rot_matrix_to_euler_angles(pose[0:3, 0:3])
+    vrep.simxSetObjectPosition(clientID, get_handle(clientID, obj_name), get_handle(clientID, 'UR3_link1_visible'), predicted_position, vrep.simx_opmode_oneshot)
+    vrep.simxSetObjectOrientation(clientID, get_handle(clientID, obj_name), get_handle(clientID, 'UR3_link1_visible'), predicted_orient, vrep.simx_opmode_oneshot)
+
+# Gets the position and orientation of an object relative to the base
+def get_object_pose(clientID, obj_name):
+    result, position = vrep.simxGetObjectPosition(clientID, get_handle(clientID, obj_name), get_handle(clientID, 'UR3_link1_visible'), vrep.simx_opmode_blocking)
+    if result != vrep.simx_return_ok:
+        raise Exception('could not get object position')
+    result, euler_angles = vrep.simxGetObjectOrientation(clientID, get_handle(clientID, obj_name), get_handle(clientID, 'UR3_link1_visible'), vrep.simx_opmode_blocking)
+    if result != vrep.simx_return_ok:
+        raise Exception('could not get object orientation')
+    #print(position)
+    #print(euler_angles)
+
+    Rx = np.array([ [1, 0, 0],
+                    [0, math.cos(euler_angles[0]), -math.sin(euler_angles[0])],
+                    [0, math.sin(euler_angles[0]), math.cos(euler_angles[0])] ])
+
+    Ry = np.array([ [math.cos(euler_angles[1]),0,math.sin(euler_angles[1])],
+                    [0,1,0],
+                    [-math.sin(euler_angles[1]),0,math.cos(euler_angles[1])] ])
+
+    Rz = np.array([ [math.cos(euler_angles[2]),-math.sin(euler_angles[2]),0],
+                    [math.sin(euler_angles[2]),math.cos(euler_angles[2]),0],
+                    [0,0,1] ])
+
+    R = Rx.dot(Ry).dot(Rz)
+    position = (np.array(position))[:, None]
+    foo_top = np.concatenate((R, position), axis = 1)
+    foo_bottom = np.array([[0,0,0,1]])
+    pose = np.concatenate((foo_top, foo_bottom), axis = 0)
+
+    return pose
+
+# Gets the position of an object relative to the base
+def get_object_position(clientID, obj_name):
+    result, position = vrep.simxGetObjectPosition(clientID, get_handle(clientID, obj_name), get_handle(clientID, 'UR3_link1_visible'), vrep.simx_opmode_blocking)
+    if result != vrep.simx_return_ok:
+        raise Exception('could not get object position')
+    #print(position)
+    return position
+
+################################################################################
+# Helper functions that do not interface with VREP
+################################################################################
 
 def get_screw(axis, point):
     w = axis
@@ -94,14 +191,6 @@ def rot_matrix_to_euler_angles(R):
         z = 0
 
     return np.array([x, y, z])
-
-def open_gripper(clientID):
-    #print('Opening gripper...\n')
-    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 0, vrep.simx_opmode_blocking)
-
-def close_gripper(clientID):
-    #print('Closing gripper...\n')
-    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_blocking)
 
 def adjoint(T):
     R = T[:3,:3]
@@ -151,51 +240,6 @@ def get_current_pose(S, theta):
     e6 = la.expm(bracket_screw(S[5]) * theta[5])
     return  e1.dot(e2).dot(e3).dot(e4).dot(e5).dot(e6).dot(M)
 
-# Sets the position and orientation of an object to the base
-def set_object_pose(clientID, pose, obj_name):
-    predicted_position = pose[0:3, 3]
-    predicted_orient = rot_matrix_to_euler_angles(pose[0:3, 0:3])
-    vrep.simxSetObjectPosition(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), predicted_position, vrep.simx_opmode_oneshot)
-    vrep.simxSetObjectOrientation(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), predicted_orient, vrep.simx_opmode_oneshot)
-
-# Gets the position and orientation of an object relative to the base
-def get_object_pose(clientID, obj_name):
-    result, position = vrep.simxGetObjectPosition(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), vrep.simx_opmode_blocking)
-    if result != vrep.simx_return_ok:
-        raise Exception('could not get object position')
-    result, euler_angles = vrep.simxGetObjectOrientation(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), vrep.simx_opmode_blocking)
-    if result != vrep.simx_return_ok:
-        raise Exception('could not get object orientation')
-    #print(position)
-    #print(euler_angles)
-
-    Rx = np.array([ [1, 0, 0],
-                    [0, math.cos(euler_angles[0]), -math.sin(euler_angles[0])],
-                    [0, math.sin(euler_angles[0]), math.cos(euler_angles[0])] ])
-
-    Ry = np.array([ [math.cos(euler_angles[1]),0,math.sin(euler_angles[1])],
-                    [0,1,0],
-                    [-math.sin(euler_angles[1]),0,math.cos(euler_angles[1])] ])
-
-    Rz = np.array([ [math.cos(euler_angles[2]),-math.sin(euler_angles[2]),0],
-                    [math.sin(euler_angles[2]),math.cos(euler_angles[2]),0],
-                    [0,0,1] ])
-
-    R = Rx.dot(Ry).dot(Rz)
-    position = (np.array(position))[:, None]
-    foo_top = np.concatenate((R, position), axis = 1)
-    foo_bottom = np.array([[0,0,0,1]])
-    pose = np.concatenate((foo_top, foo_bottom), axis = 0)
-
-    return pose
-
-def get_object_position(clientID, obj_name):
-    result, position = vrep.simxGetObjectPosition(clientID, get_handle(obj_name), get_handle('UR3_link1_visible'), vrep.simx_opmode_blocking)
-    if result != vrep.simx_return_ok:
-        raise Exception('could not get object position')
-    #print(position)
-    return position
-
 # Returns the distance between two 3D points
 def distance_between_points(p_1, p_2):
     return math.sqrt((p_1[0] - p_2[0])**2 + (p_1[1] - p_2[1])**2 + (p_1[2] - p_2[2])**2)
@@ -234,7 +278,6 @@ def get_sphere_position(theta, S, M, N):
         a = a.dot(e[i - 1])
 
     return a.dot(b)
-
 
 # Inputs:
 #  - S: as given by prairielearn
@@ -281,29 +324,6 @@ def is_there_collision(S, theta, P_robot, P_obstacle, R):
 
 
     return collision
-
-def place_robot_in_configuration(joint_handles, configuration, delay):
-    for j in range(6):
-        set_joint_angle(joint_handles[j], configuration[j], j+1, delay)
-
-def smooth_place_robot_in_configuration(joint_handles, theta_start, theta_end):
-    N = 20
-    theta = []
-    slopes = []
-    for i in range(len(theta_start)):
-        slopes.append((theta_end[i] - theta_start[i]) / N)
-    for i in range(N):
-        next_theta = []
-        for j in range(len(theta_start)):
-            next_theta.append(slopes[j] * i + theta_start[j])
-        theta.append(next_theta)
-    theta = np.array(theta)
-
-    for i in range(len(theta)):
-        the_theta = theta[i]
-        for j in range(6):
-            set_joint_angle(joint_handles[j], the_theta[j], j+1, 0.00001)
-        time.sleep(0.02)
 
 # Inputs:
 #  - theta_start: a list of N thetas where N = number of joints
@@ -368,8 +388,6 @@ def get_closest_node_in_tree(the_node, tree):
 
 # Checkpoint 2 demo
 def forward_kinematics_demo(clientID, joint_handles, S, pose):
-
-    # User inputted thetas (in degrees)
     print("FORWARD KINEMATICS")
     print("Input the values of the six joint angles:")
     print("(e.g. 90 0 0 0 0 0)")
@@ -379,7 +397,6 @@ def forward_kinematics_demo(clientID, joint_handles, S, pose):
 
 def helper_forward_kinematics(clientID, joint_handles, S, pose, theta):
     for i in range(5, -1, -1):
-        #print('i=', i, 'theta=', theta[i])
         bracket_S = bracket_screw(S[i])
         pose = np.dot(la.expm(bracket_S * theta[i]), pose)
 
@@ -389,9 +406,8 @@ def helper_forward_kinematics(clientID, joint_handles, S, pose, theta):
 
     # Turn all joints
     for i in range(6):
-        turn_joint(joint_handles[i], theta[i], i+1, 1)
+        turn_joint(clientID, joint_handles[i], theta[i], i+1, 1)
 
-    # Close gripper
     close_gripper(clientID)
 
 # Returns theta that would produce the given goal pose
@@ -400,8 +416,6 @@ def helper_forward_kinematics(clientID, joint_handles, S, pose, theta):
 # goal_T1in0 is the goal pose of the end effector
 def do_inverse_kinematics(S, M, goal_T1in0):
     # Parameters
-    #print('Goal pose:', goal_T1in0)
-    #goal_T1in0 = M
     epsilon = 0.01 # Want error to be this small
     k = 1 # Parameter in theta = theta + thetadot * k
     N = 200 # Maximum number of loops
@@ -415,30 +429,24 @@ def do_inverse_kinematics(S, M, goal_T1in0):
 
         # Get current pose that results from theta (forward kinematics)
         current_T1in0 = get_current_pose(S, theta)
-        ##print('current pose:', current_T1in0)
 
         # Get the twist that would produce the target pose if undergone for 1 second
         bracket_twist = la.logm(goal_T1in0.dot( la.inv(current_T1in0)  ))
         twist = inverse_bracket_screw(bracket_twist)
-        ##print('twist:', twist)
 
         # Compute space Jacobian J of theta
         J = get_current_jacobian(S, theta)
-        ##print('J:', J)
 
         # Compute thetadot with the regularized least-squares solution
         Jt = np.transpose(J)
         thetadot = la.inv(Jt.dot(J) + mu * np.eye(6)).dot(Jt).dot(twist)
         thetadot = np.squeeze(thetadot)
-        ##print('thetadot:', thetadot)
 
         # Compute new theta = theta + thetadot * 1
         theta = np.add(theta, thetadot * k)
-        ##print('newtheta', theta)
 
         # Determine error
         error = la.norm(twist)
-        #print(i, error)
 
         # Stop if error is small enough or if we have looped too many times
         if error < epsilon:
@@ -458,17 +466,16 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
 
     while True:
         open_gripper(clientID)
-        time.sleep(2)
-        input("Place block at desired pose and press enter...")
+        input("Place pawn at desired pose and press enter...")
 
-        goal_pose = get_object_pose(clientID, 'pawn0')
+        goal_pose = get_object_pose(clientID, 'white_pawn1')
         goal_pose[2, 3] += 0.05
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
 
         # Turn all joints
-        for i in range(6):
-            set_joint_angle(joint_handles[i], theta[i], i+1, 0.1)
+        theta_start = get_robot_configuration(clientID, joint_handles)
+        smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
         # Close gripper
         time.sleep(1)
@@ -481,7 +488,7 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
 def collision_detection(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle):
     x = [0, 0, 0, 0, 0, 0]
     for j in range(6):
-        set_joint_angle(joint_handles[j], x[j], j+1, 0.1)
+        set_joint_angle(clientID, joint_handles[j], x[j], j+1, 0.1)
 
     print("Collision Detection Demo")
 
@@ -510,7 +517,7 @@ def collision_detection(clientID, joint_handles, S, M, P_robot, P_obstacle, r_ro
         x = theta[i]
         # Turn all joints
         for j in range(6):
-            set_joint_angle(joint_handles[j], x[j], j+1, 0.1)
+            set_joint_angle(clientID, joint_handles[j], x[j], j+1, 0.1)
         print("Turned joints to configuration ", i)
 
         coll = is_there_collision(S, x, P_robot, P_obstacle, R)
@@ -523,9 +530,9 @@ def collision_detection(clientID, joint_handles, S, M, P_robot, P_obstacle, r_ro
 
         x = [0, 0, 0, 0, 0, 0]
         for j in range(6):
-            set_joint_angle(joint_handles[j], x[j], j+1, 0.1)
+            set_joint_angle(clientID, joint_handles[j], x[j], j+1, 0.1)
 
-# Checkpoint 4.5
+# Checkpoint 4.5 demo
 def checking_collision_in_line(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle):
     theta_start = np.array([[0, 0, 0, 0, 0, 0, 0],
                             [0, 0, 0, 0, 0, 0, 0],
@@ -549,14 +556,14 @@ def checking_collision_in_line(clientID, joint_handles, S, M, P_robot, P_obstacl
 
     for i in range(6):
         # Put robot in start configuration
-        place_robot_in_configuration(joint_handles, theta_start[i], 0.1)
+        place_robot_in_configuration(clientID, joint_handles, theta_start[i], 0.1)
         print("Placed robot in theta_start configuration")
 
         if is_there_collision_in_line(S, theta_start[i], theta_goal[i], P_robot, P_obstacle, R):
             print("Collision detected in line from theta_start to theta_goal")
         else:
             print("No collision detected in line from theta_start to theta_goal")
-            smooth_place_robot_in_configuration(joint_handles, theta_start[i], theta_goal[i])
+            smooth_place_robot_in_configuration(clientID, joint_handles, theta_start[i], theta_goal[i])
             print("Placed robot in theta_goal configuration")
 
         input("Press enter to continue...")
@@ -569,7 +576,7 @@ def motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot,
     theta_goal = np.array([[0.24], [0.01], [-0.32], [0.94], [1.09], [0.93]])
 
     # Put robot in start configuration
-    place_robot_in_configuration(joint_handles, theta_start, 0.1)
+    place_robot_in_configuration(clientID, joint_handles, theta_start, 0.1)
 
     # Radii of all the spheres
     R = np.concatenate((r_robot, r_obstacle), axis = 1)
@@ -580,10 +587,10 @@ def motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot,
     print(goal_pose)
     theta = do_inverse_kinematics(S.T, M, goal_pose)
     print(theta)
-    place_robot_in_configuration(joint_handles, theta, 0.1)
-    #smooth_place_robot_in_configuration(joint_handles, theta_start, theta)
+    place_robot_in_configuration(clientID, joint_handles, theta, 0.1)
+    #smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
-    #smooth_place_robot_in_configuration(joint_handles, theta, theta_start)
+    #smooth_place_robot_in_configuration(clientID, joint_handles, theta, theta_start)
 
 
 ################################################################################
@@ -599,22 +606,22 @@ if clientID == -1:
     raise Exception('Failed connecting to remote API server')
 
 # Get "handles" to all joints of robot
-joint_one_handle = get_handle('UR3_joint1')
-joint_two_handle = get_handle('UR3_joint2')
-joint_three_handle = get_handle('UR3_joint3')
-joint_four_handle = get_handle('UR3_joint4')
-joint_five_handle = get_handle('UR3_joint5')
-joint_six_handle = get_handle('UR3_joint6')
+joint_one_handle = get_handle(clientID, 'UR3_joint1')
+joint_two_handle = get_handle(clientID, 'UR3_joint2')
+joint_three_handle = get_handle(clientID, 'UR3_joint3')
+joint_four_handle = get_handle(clientID, 'UR3_joint4')
+joint_five_handle = get_handle(clientID, 'UR3_joint5')
+joint_six_handle = get_handle(clientID, 'UR3_joint6')
 joint_handles = [joint_one_handle, joint_two_handle, joint_three_handle, joint_four_handle, joint_five_handle, joint_six_handle]
 
 # Start simulation
-#vrep.simxStartSimulation(clientID, vrep.simx_opmode_oneshot)
+vrep.simxStartSimulation(clientID, vrep.simx_opmode_oneshot)
 
 ################################################################################
 #===============================Simulation======================================
 ################################################################################
 
-#place_robot_in_configuration(joint_handles, [0,0,0,0,0,0], 0.1)
+#place_robot_in_configuration(clientID, joint_handles, [0,0,0,0,0,0], 0.1)
 
 # Get array of all S's
 S = np.zeros((6, 6))
@@ -665,7 +672,7 @@ r_obstacle = np.array([[0.15]])
 #motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
 
 # Stop simulation
-#vrep.simxStopSimulation(clientID, vrep.simx_opmode_oneshot)
+vrep.simxStopSimulation(clientID, vrep.simx_opmode_oneshot)
 
 # Before closing the connection to V-REP, make sure that the last command sent out had time to arrive. You can guarantee this with (for example):
 vrep.simxGetPingTime(clientID)
