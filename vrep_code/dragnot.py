@@ -5,16 +5,14 @@ import numpy as np
 import scipy.linalg as la
 
 ################################################################################
-# Description of Robot
+# Description of the Robot
 ################################################################################
-Base = np.array([0.3250, 0.1250, 0.8053])
 
-# Pose of end effector at the beginning
-M = np.array([  [0,0,-1, 0.1049 - Base[0]],
-                [0,1,0, 0.1326 - Base[1]],
-                [1,0,0, 1.4562 - Base[2]],
-                [0,0,0,1] ])
-
+# Pose of end effector at the zero configuration (all thetas zero)
+M = np.array([  [0, 0, -1, -0.22008017],
+                [0, 1, 0, 0.00761688 ],
+                [1, 0, 0, 0.65112448],
+                [0, 0, 0, 1]])
 
 # Screw axes and positions
 a = np.array([  [0,0,1],
@@ -22,13 +20,14 @@ a = np.array([  [0,0,1],
                 [-1,0,0],
                 [-1,0,0],
                 [0,0,1],
-                [-1,0,0] ])
-q = np.array([  [0.3250 - Base[0], 0, 0.9097 - Base[2]],
-                [0.2133 - Base[0], 0, 0.9141 - Base[2]],
-                [0.2133 - Base[0], 0, 1.11578 - Base[2]],
-                [0.2133 - Base[0], 0, 1.3710 - Base[2]],
-                [0.2127 - Base[0], 0, 1.4553 - Base[2]],
-                [0.2133 - Base[0], 0, 1.4562 - Base[2]] ])
+                [-1,0,0]])
+
+q = np.array([  [-2.98023224e-08, -7.45058060e-08, 1.04472935e-01],
+                [-1.11666068e-01, -3.12328339e-05, 1.08873367e-01],
+                [-1.11666396e-01,  4.46438789e-05, 3.52523446e-01],
+                [-1.11665919e-01, -4.91738319e-07, 5.65773487e-01],
+                [-1.12349987e-01, -5.21540642e-07, 6.49991035e-01],
+                [-1.11665905e-01, -5.66244125e-07, 6.51123405e-01]])
 
 ################################################################################
 # Helper functions
@@ -123,7 +122,7 @@ def adjoint(T):
 def cat(a,b,ax): return np.concatenate((a, b), axis = ax)
 
 # can probably be shortened
-def get_current_jacobian(theta):
+def get_current_jacobian(S, theta):
     e1 = la.expm(bracket_screw(S[0]) * theta[0])
     e2 = la.expm(bracket_screw(S[1]) * theta[1])
     e3 = la.expm(bracket_screw(S[2]) * theta[2])
@@ -143,7 +142,7 @@ def get_current_jacobian(theta):
     Js = cat(Js, J6, 1)
     return Js
 
-def get_current_pose(theta):
+def get_current_pose(S, theta):
     e1 = la.expm(bracket_screw(S[0]) * theta[0])
     e2 = la.expm(bracket_screw(S[1]) * theta[1])
     e3 = la.expm(bracket_screw(S[2]) * theta[2])
@@ -396,26 +395,26 @@ def helper_forward_kinematics(clientID, joint_handles, S, pose, theta):
     close_gripper(clientID)
 
 # Returns theta that would produce the given goal pose
+# Inputs: S where S[i] is the ith screw
+# M is the initial pose of the end effector
+# goal_T1in0 is the goal pose of the end effector
 def do_inverse_kinematics(S, M, goal_T1in0):
     # Parameters
     #print('Goal pose:', goal_T1in0)
-    epsilon = 0.1 # Want error to be this small
+    #goal_T1in0 = M
+    epsilon = 0.01 # Want error to be this small
     k = 1 # Parameter in theta = theta + thetadot * k
-    N = 100 # Maximum number of loops
+    N = 200 # Maximum number of loops
     mu = 0.1 # Parameter in thetadot equation
 
     # Initial guess for thetas
     theta = np.array([0,0,0,0,0,0])
-
     i = 0
-    #print('Finding theta that would produce the wanted pose...')
     while True:
         i += 1
-        ##print()
-        ##print(i)
 
         # Get current pose that results from theta (forward kinematics)
-        current_T1in0 = get_current_pose(theta)
+        current_T1in0 = get_current_pose(S, theta)
         ##print('current pose:', current_T1in0)
 
         # Get the twist that would produce the target pose if undergone for 1 second
@@ -424,7 +423,7 @@ def do_inverse_kinematics(S, M, goal_T1in0):
         ##print('twist:', twist)
 
         # Compute space Jacobian J of theta
-        J = get_current_jacobian(theta)
+        J = get_current_jacobian(S, theta)
         ##print('J:', J)
 
         # Compute thetadot with the regularized least-squares solution
@@ -462,9 +461,10 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
         time.sleep(2)
         input("Place block at desired pose and press enter...")
 
-        goal_pose = get_object_pose(clientID, 'Frame_1')
+        goal_pose = get_object_pose(clientID, 'pawn0')
+        goal_pose[2, 3] += 0.05
 
-        theta = do_inverse_kinematics(S, M, goal_pose)
+        theta = do_inverse_kinematics(S.T, M, goal_pose)
 
         # Turn all joints
         for i in range(6):
@@ -578,7 +578,7 @@ def motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot,
     #position_ball = np.array([+2.3000e-02 - Base[0], +5.8900e-01 - Base[1], +1.0250e+00 - Base[2]])
     goal_pose = get_object_pose(clientID, 'Target')
     print(goal_pose)
-    theta = do_inverse_kinematics(S, M, goal_pose)
+    theta = do_inverse_kinematics(S.T, M, goal_pose)
     print(theta)
     place_robot_in_configuration(joint_handles, theta, 0.1)
     #smooth_place_robot_in_configuration(joint_handles, theta_start, theta)
@@ -614,6 +614,8 @@ joint_handles = [joint_one_handle, joint_two_handle, joint_three_handle, joint_f
 #===============================Simulation======================================
 ################################################################################
 
+#place_robot_in_configuration(joint_handles, [0,0,0,0,0,0], 0.1)
+
 # Get array of all S's
 S = np.zeros((6, 6))
 for i in range(6):
@@ -624,7 +626,9 @@ S = S.transpose()
 #forward_kinematics_demo(clientID, joint_handles, S, M)
 
 # Checkpoint 3 demo
-#inverse_kinematics_demo(clientID, joint_handles, S, M)
+
+
+inverse_kinematics_demo(clientID, joint_handles, S, M)
 
 # Initial positions of the spheres of the UR3
 P_robot = []
@@ -658,7 +662,7 @@ r_obstacle = np.array([[0.15]])
 
 # Checkpoint 5 demo
 #checking_collision_in_line(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
-motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
+#motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
 
 # Stop simulation
 #vrep.simxStopSimulation(clientID, vrep.simx_opmode_oneshot)
