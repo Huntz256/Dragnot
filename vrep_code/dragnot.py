@@ -73,7 +73,7 @@ def place_robot_in_configuration(clientID, joint_handles, configuration, delay):
 # Sets a robot configuration by setting all joint angles to the
 #   configurations on a straight-line path to the given configuration
 def smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta_end):
-    N = 20; theta = []; slopes = []
+    N = 30; theta = []; slopes = []
     for i in range(len(theta_start)):
         slopes.append((theta_end[i] - theta_start[i]) / N)
     for i in range(N):
@@ -90,7 +90,7 @@ def smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, th
         for j in range(6):
             vrep.simxSetJointPosition(clientID, joint_handles[j], the_theta[j], vrep.simx_opmode_oneshot)
         vrep.simxPauseCommunication(clientID, False)
-        time.sleep(0.05)
+        time.sleep(0.04)
 
 # Get "handle" to the given joint of robot
 def get_handle(clientID, joint_name):
@@ -101,12 +101,31 @@ def get_handle(clientID, joint_name):
 
 # Opens the baxer gripper
 def open_gripper(clientID):
-    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 0, vrep.simx_opmode_blocking)
+    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 0, vrep.simx_opmode_oneshot)
 
 # Closes the baxer gripper
 def close_gripper(clientID):
     vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_oneshot)
-    return
+    time.sleep(1.2)
+    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 2, vrep.simx_opmode_oneshot)
+
+# Grabs an object sensed by the object sensor
+def pickup(clientID, connector, object_sensor):
+    result, detectionState, detectedPoint, detectedObjectHandle, detectedSurfaceNormalVector = vrep.simxReadProximitySensor(clientID, object_sensor, vrep.simx_opmode_buffer)
+    #print(result, detectionState, detectedPoint, detectedObjectHandle, detectedSurfaceNormalVector)
+    attached_shape = None
+    if detectionState == 1:
+        attached_shape = detectedObjectHandle
+        vrep.simxSetObjectParent(clientID, attached_shape, connector, True, vrep.simx_opmode_blocking)
+        close_gripper(clientID)
+    return attached_shape
+
+# Releases an object
+def drop(clientID, attached_shape):
+    open_gripper(clientID)
+    if attached_shape != None:
+        vrep.simxSetObjectParent(clientID, attached_shape, -1, True, vrep.simx_opmode_blocking)
+
 
 # Sets the position and orientation of an object relative to the base
 def set_object_pose(clientID, pose, obj_name):
@@ -417,9 +436,9 @@ def helper_forward_kinematics(clientID, joint_handles, S, pose, theta):
 # goal_T1in0 is the goal pose of the end effector
 def do_inverse_kinematics(S, M, goal_T1in0):
     # Parameters
-    epsilon = 0.01 # Want error to be this small
+    epsilon = 0.005 # Want error to be this small
     k = 1 # Parameter in theta = theta + thetadot * k
-    N = 200 # Maximum number of loops
+    N = 500 # Maximum number of loops
     mu = 0.1 # Parameter in thetadot equation
 
     # Initial guess for thetas
@@ -452,55 +471,77 @@ def do_inverse_kinematics(S, M, goal_T1in0):
         # Stop if error is small enough or if we have looped too many times
         if error < epsilon:
             theta = theta[:, None]
-            print('Success! theta = ', theta.tolist())
+            #print('Success! theta = ', theta.tolist())
             break
         if i > N:
             theta = theta[:, None]
-            print('Not reachable.', error)
+            print('Warning: not reachable.', error)
             break
 
     return theta
 
-# Checkpoint 3 demo
-def inverse_kinematics_demo(clientID, joint_handles, S, M):
-    print('INVERSE KINEMATICS DEMO')
+def dragnot_demo(clientID, joint_handles, S, M):
+    print('DRAGNOT DEMO')
+
+    result, connector_handle = vrep.simxGetObjectHandle(clientID, 'BaxterGripper_attachPoint', vrep.simx_opmode_blocking)
+    if result != vrep.simx_return_ok:
+        raise Exception('could not get object handle')
+    result, object_sensor_handle = vrep.simxGetObjectHandle(clientID, 'BaxterGripper_attachProxSensor', vrep.simx_opmode_blocking)
+    if result != vrep.simx_return_ok:
+        raise Exception('could not get object handle')
+
+    vrep.simxReadProximitySensor(clientID, object_sensor_handle, vrep.simx_opmode_streaming)
 
     while True:
-        open_gripper(clientID)
         pos = input("Enter the initial chessboard position : ")
         pos2 = input("Enter the destination chessboard position : ")
 
+        # Go to piece at first position...
         goal_pose = get_object_pose(clientID, pos)
-        goal_pose[0, 0] = -1;
-        goal_pose[2, 2] = -1;
-        goal_pose[2, 3] += 0.1;
+        goal_pose[0, 0] = -1
+        goal_pose[2, 2] = -1
+        goal_pose[2, 3] += 0.15
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
-
-        # Turn all joints
         theta_start = get_robot_configuration(clientID, joint_handles)
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
-        pickup()
+        goal_pose[2, 3] -= 0.04
 
+        theta = do_inverse_kinematics(S.T, M, goal_pose)
+        theta_start = get_robot_configuration(clientID, joint_handles)
+        smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
+
+        # Pick up piece at first position...
+        time.sleep(1) # Wait a bit before trying to pickup
+        attached_shape = pickup(clientID, connector_handle, object_sensor_handle)
+
+        goal_pose[2, 3] += 0.04
+        theta = do_inverse_kinematics(S.T, M, goal_pose)
+        theta_start = get_robot_configuration(clientID, joint_handles)
+        smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
+
+        # Go to end position
         goal_pose = get_object_pose(clientID, pos2)
-        goal_pose[0, 0] = -1;
-        goal_pose[2, 2] = -1;
-        goal_pose[2, 3] += 0.1;
+        goal_pose[0, 0] = -1
+        goal_pose[2, 2] = -1
+        goal_pose[2, 3] += 0.15
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
-
-        # Turn all joints
         theta_start = get_robot_configuration(clientID, joint_handles)
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
-        drop()
-        # Close gripper
-        # time.sleep(3)
-        # close_gripper(clientID)
-        # time.sleep(1)
+        goal_pose[2, 3] -= 0.04
 
-    print('END OF INVERSE KINEMATICS DEMO')
+        theta = do_inverse_kinematics(S.T, M, goal_pose)
+        theta_start = get_robot_configuration(clientID, joint_handles)
+        smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
+
+        # Release chess piece
+        drop(clientID, attached_shape)
+
+
+    print('END OF DRAGNOT DEMO')
 
 # Checkpoint 4 demo
 def collision_detection(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle):
@@ -650,13 +691,9 @@ for i in range(6):
     S[i] = get_screw(a[i], q[i])
 S = S.transpose()
 
-# Checkpoint 2 demo
 #forward_kinematics_demo(clientID, joint_handles, S, M)
 
-# Checkpoint 3 demo
-
-
-inverse_kinematics_demo(clientID, joint_handles, S, M)
+dragnot_demo(clientID, joint_handles, S, M)
 
 # Initial positions of the spheres of the UR3
 P_robot = []
@@ -685,10 +722,7 @@ r_robot = np.array([[0.075, 0.075, 0.075, 0.075, 0.075, 0.075,
 # Radii of obstacle spheres (one obstacle for now)
 r_obstacle = np.array([[0.15]])
 
-# Checkpoint 4 demo
 #collision_detection(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
-
-# Checkpoint 5 demo
 #checking_collision_in_line(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
 #motion_planning(clientID, joint_handles, S, M, P_robot, P_obstacle, r_robot, r_obstacle)
 
