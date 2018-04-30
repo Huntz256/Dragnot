@@ -467,13 +467,13 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
 
     while True:
         open_gripper(clientID)
-        pos = input("Enter the chessboard position : ")
+        pos = input("Enter the initial chessboard position : ")
+        pos2 = input("Enter the destination chessboard position : ")
 
         goal_pose = get_object_pose(clientID, pos)
         goal_pose[0, 0] = -1;
         goal_pose[2, 2] = -1;
         goal_pose[2, 3] += 0.1;
-        print(goal_pose)
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
 
@@ -481,10 +481,24 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
         theta_start = get_robot_configuration(clientID, joint_handles)
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
+        pickup()
+
+        goal_pose = get_object_pose(clientID, pos2)
+        goal_pose[0, 0] = -1;
+        goal_pose[2, 2] = -1;
+        goal_pose[2, 3] += 0.1;
+
+        theta = do_inverse_kinematics(S.T, M, goal_pose)
+
+        # Turn all joints
+        theta_start = get_robot_configuration(clientID, joint_handles)
+        smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
+
+        drop()
         # Close gripper
-        time.sleep(3)
-        close_gripper(clientID)
-        time.sleep(1)
+        # time.sleep(3)
+        # close_gripper(clientID)
+        # time.sleep(1)
 
     print('END OF INVERSE KINEMATICS DEMO')
 
