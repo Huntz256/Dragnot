@@ -106,8 +106,8 @@ def open_gripper(clientID):
 # Closes the baxer gripper
 def close_gripper(clientID):
     vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_oneshot)
-    time.sleep(1.2)
-    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 2, vrep.simx_opmode_oneshot)
+    time.sleep(2)
+    #vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 2, vrep.simx_opmode_oneshot)
 
 # Grabs an object sensed by the object sensor
 def pickup(clientID, connector, object_sensor):
@@ -115,9 +115,9 @@ def pickup(clientID, connector, object_sensor):
     #print(result, detectionState, detectedPoint, detectedObjectHandle, detectedSurfaceNormalVector)
     attached_shape = None
     if detectionState == 1:
+        close_gripper(clientID)
         attached_shape = detectedObjectHandle
         vrep.simxSetObjectParent(clientID, attached_shape, connector, True, vrep.simx_opmode_blocking)
-        close_gripper(clientID)
     return attached_shape
 
 # Releases an object
@@ -481,7 +481,7 @@ def do_inverse_kinematics(S, M, goal_T1in0):
     return theta
 
 def dragnot_demo(clientID, joint_handles, S, M):
-    print('DRAGNOT DEMO')
+    print('DRAGNOT')
 
     result, connector_handle = vrep.simxGetObjectHandle(clientID, 'BaxterGripper_attachPoint', vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
@@ -492,21 +492,32 @@ def dragnot_demo(clientID, joint_handles, S, M):
 
     vrep.simxReadProximitySensor(clientID, object_sensor_handle, vrep.simx_opmode_streaming)
 
+    # Test locations
+    i = 0
+    locations = ['a2', 'b2', 'c2', 'd2', 'e2', 'f2', 'g2', 'h2', 'a1', 'b1', 'c1', 'd1', 'f1', 'g1', 'h1', 'a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7', 'a8', 'b8', 'c8', 'd8', 'f8', 'g8', 'h8']
+    locations2 = ['a4', 'b4', 'c4', 'd4', 'e4', 'f4', 'g4', 'h4', 'a3', 'b3', 'c3', 'd3', 'f3', 'g3', 'h3', 'a5', 'b5', 'c5', 'd5', 'e5', 'f5', 'g5', 'h5', 'a6', 'b6', 'c6', 'd6', 'f6', 'g6', 'h6']
+
+    user_input = True
     while True:
-        pos = input("Enter the initial chessboard position : ")
-        pos2 = input("Enter the destination chessboard position : ")
+        if user_input:
+            pos = input("Enter the initial square (e.g. e2): ")
+            pos2 = input("Enter the destination square (e.g. e4): ")
+        else:
+            pos = locations[i]
+            pos2 = locations2[i]
+            i += 1
 
         # Go to piece at first position...
         goal_pose = get_object_pose(clientID, pos)
         goal_pose[0, 0] = -1
         goal_pose[2, 2] = -1
-        goal_pose[2, 3] += 0.15
+        goal_pose[2, 3] += 0.17
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
         theta_start = get_robot_configuration(clientID, joint_handles)
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
-        goal_pose[2, 3] -= 0.04
+        goal_pose[2, 3] -= 0.05
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
         theta_start = get_robot_configuration(clientID, joint_handles)
@@ -516,7 +527,7 @@ def dragnot_demo(clientID, joint_handles, S, M):
         time.sleep(1) # Wait a bit before trying to pickup
         attached_shape = pickup(clientID, connector_handle, object_sensor_handle)
 
-        goal_pose[2, 3] += 0.04
+        goal_pose[2, 3] += 0.05
         theta = do_inverse_kinematics(S.T, M, goal_pose)
         theta_start = get_robot_configuration(clientID, joint_handles)
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
@@ -525,13 +536,13 @@ def dragnot_demo(clientID, joint_handles, S, M):
         goal_pose = get_object_pose(clientID, pos2)
         goal_pose[0, 0] = -1
         goal_pose[2, 2] = -1
-        goal_pose[2, 3] += 0.15
+        goal_pose[2, 3] += 0.17
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
         theta_start = get_robot_configuration(clientID, joint_handles)
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
-        goal_pose[2, 3] -= 0.04
+        goal_pose[2, 3] -= 0.05
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
         theta_start = get_robot_configuration(clientID, joint_handles)
