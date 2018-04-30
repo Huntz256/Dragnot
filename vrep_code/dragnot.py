@@ -105,7 +105,8 @@ def open_gripper(clientID):
 
 # Closes the baxer gripper
 def close_gripper(clientID):
-    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_blocking)
+    vrep.simxSetIntegerSignal(clientID, 'BaxterGripper_close', 1, vrep.simx_opmode_oneshot)
+    return
 
 # Sets the position and orientation of an object relative to the base
 def set_object_pose(clientID, pose, obj_name):
@@ -466,10 +467,13 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
 
     while True:
         open_gripper(clientID)
-        input("Place pawn at desired pose and press enter...")
+        pos = input("Enter the chessboard position : ")
 
-        goal_pose = get_object_pose(clientID, 'white_pawn1')
-        goal_pose[2, 3] += 0.05
+        goal_pose = get_object_pose(clientID, pos)
+        goal_pose[0, 0] = -1;
+        goal_pose[2, 2] = -1;
+        goal_pose[2, 3] += 0.1;
+        print(goal_pose)
 
         theta = do_inverse_kinematics(S.T, M, goal_pose)
 
@@ -478,7 +482,7 @@ def inverse_kinematics_demo(clientID, joint_handles, S, M):
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
         # Close gripper
-        time.sleep(1)
+        time.sleep(3)
         close_gripper(clientID)
         time.sleep(1)
 
@@ -621,7 +625,10 @@ vrep.simxStartSimulation(clientID, vrep.simx_opmode_oneshot)
 #===============================Simulation======================================
 ################################################################################
 
-#place_robot_in_configuration(clientID, joint_handles, [0,0,0,0,0,0], 0.1)
+# Reset position to all zeros
+theta = [0, 0, 0, 0, 0, 0]
+theta_start = get_robot_configuration(clientID, joint_handles)
+smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
 # Get array of all S's
 S = np.zeros((6, 6))
