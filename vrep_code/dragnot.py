@@ -3,6 +3,7 @@ import time
 import math
 import numpy as np
 import scipy.linalg as la
+import sys
 
 ################################################################################
 # Description of the Robot
@@ -402,6 +403,42 @@ def get_closest_node_in_tree(the_node, tree):
             closest = node
     return closest
 
+def get_chess_position(clientID, squares_pos):
+    #print('Getting the chess position...')
+    board = [' ' for _ in range(64)]
+
+
+    piece_to_letter = {'white_pawn1':'P', 'white_pawn2':'P', 'white_pawn3':'P', 'white_pawn4':'P', 'white_pawn5':'P', 'white_pawn6':'P', 'white_pawn7':'P', 'white_pawn8':'P',
+                  'white_rook':'R', 'white_knight':'N', 'white_bishop':'B', 'white_queen':'Q', 'white_king':'K', 'white_bishop2':'B', 'white_knight2':'N', 'white_rook2':'R',
+                  'black_pawn1':'p', 'black_pawn2':'p', 'black_pawn3':'p', 'black_pawn4':'p', 'black_pawn5':'p', 'black_pawn6':'p', 'black_pawn7':'p', 'black_pawn8':'p',
+                  'black_rook':'r', 'black_knight':'n', 'black_bishop':'b', 'black_queen':'q', 'black_king':'k', 'black_bishop2':'b', 'black_knight2':'n', 'black_rook2':'r'}
+
+    pieces = ['white_pawn1', 'white_pawn2', 'white_pawn3', 'white_pawn4', 'white_pawn5', 'white_pawn6', 'white_pawn7', 'white_pawn8',
+              'white_rook', 'white_knight', 'white_bishop', 'white_queen', 'white_king', 'white_bishop2', 'white_knight2', 'white_rook2',
+              'black_pawn1', 'black_pawn2', 'black_pawn3', 'black_pawn4', 'black_pawn5', 'black_pawn6', 'black_pawn7', 'black_pawn8',
+              'black_rook', 'black_knight', 'black_bishop', 'black_queen', 'black_king', 'black_bishop2', 'black_knight2', 'black_rook2']
+    pieces_pos = {}
+    for piece in pieces:
+        pieces_pos[piece] = np.array(get_object_position(clientID, piece))
+
+    i = 0
+    for square_pos in squares_pos:
+        for piece in pieces:
+            if np.linalg.norm(square_pos - pieces_pos[piece]) < 0.05:
+                board[i] = piece_to_letter[piece]
+        i += 1
+
+    return board
+
+def print_board(board):
+    print('Getting the chess position...')
+    print('The chess position is now:')
+    for j in range(8):
+        print(8 - j, end='  ')
+        for i in range(56, 64):
+            print(board[i - j*8], end=' ')
+        print()
+    print('   a b c d e f g h')
 ################################################################################
 # Demos
 ################################################################################
@@ -481,8 +518,6 @@ def do_inverse_kinematics(S, M, goal_T1in0):
     return theta
 
 def dragnot_demo(clientID, joint_handles, S, M):
-    print('DRAGNOT')
-
     result, connector_handle = vrep.simxGetObjectHandle(clientID, 'BaxterGripper_attachPoint', vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get object handle')
@@ -492,6 +527,20 @@ def dragnot_demo(clientID, joint_handles, S, M):
 
     vrep.simxReadProximitySensor(clientID, object_sensor_handle, vrep.simx_opmode_streaming)
 
+    # Positions of each square
+    squares = ['a1', 'b1', 'c1', 'd1', 'e1', 'f1', 'g1', 'h1',
+        'a2', 'b2', 'c2', 'd2', 'e2', 'f2', 'g2', 'h2',
+        'a3', 'b3', 'c3', 'd3', 'e3', 'f3', 'g3', 'h3',
+        'a4', 'b4', 'c4', 'd4', 'e4', 'f4', 'g4', 'h4',
+        'a5', 'b5', 'c5', 'd5', 'e5', 'f5', 'g5', 'h5',
+        'a6', 'b6', 'c6', 'd6', 'e6', 'f6', 'g6', 'h6',
+        'a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7',
+        'a8', 'b8', 'c8', 'd8', 'e8', 'f8', 'g8', 'h8']
+    squares_pos = []
+    for square in squares:
+        squares_pos.append(get_object_position(clientID, square))
+    squares_pos = np.array(squares_pos)
+
     # Test locations
     i = 0
     locations = ['a2', 'b2', 'c2', 'd2', 'e2', 'f2', 'g2', 'h2', 'a1', 'b1', 'c1', 'd1', 'f1', 'g1', 'h1', 'a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7', 'a8', 'b8', 'c8', 'd8', 'f8', 'g8', 'h8']
@@ -500,8 +549,10 @@ def dragnot_demo(clientID, joint_handles, S, M):
     user_input = True
     while True:
         if user_input:
-            pos = input("Enter the initial square (e.g. e2): ")
-            pos2 = input("Enter the destination square (e.g. e4): ")
+            print('\nDragnot\'s turn.')
+            print('\nInput a chess move')
+            pos = input(" Enter the start square (e.g. e2): ")
+            pos2 = input(" Enter the destination square (e.g. e4): ")
         else:
             pos = locations[i]
             pos2 = locations2[i]
@@ -550,6 +601,34 @@ def dragnot_demo(clientID, joint_handles, S, M):
 
         # Release chess piece
         drop(clientID, attached_shape)
+
+        goal_pose[2, 3] += 0.05
+
+        theta = do_inverse_kinematics(S.T, M, goal_pose)
+        theta_start = get_robot_configuration(clientID, joint_handles)
+        smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
+
+        theta = [0, 0, 0, 0, 0, 0]
+        theta_start = get_robot_configuration(clientID, joint_handles)
+        smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
+
+        board = get_chess_position(clientID, squares_pos)
+        print_board(board)
+        prev_board = board
+
+        print('\nHuman\'s turn.\n')
+        print('Waiting for the human to move a piece on the board...',end='')
+        while True:
+            time.sleep(1)
+            print(end='.')
+            sys.stdout.flush()
+            board = get_chess_position(clientID, squares_pos)
+            if board != prev_board:
+                break
+
+        print_board(board)
+
+
 
 
     print('END OF DRAGNOT DEMO')
