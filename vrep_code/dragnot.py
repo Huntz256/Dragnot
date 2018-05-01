@@ -4,6 +4,7 @@ import math
 import numpy as np
 import scipy.linalg as la
 import sys
+import os
 
 ################################################################################
 # Description of the Robot
@@ -404,7 +405,6 @@ def get_closest_node_in_tree(the_node, tree):
     return closest
 
 def get_chess_position(clientID, squares_pos):
-    #print('Getting the chess position...')
     board = [' ' for _ in range(64)]
 
 
@@ -431,7 +431,7 @@ def get_chess_position(clientID, squares_pos):
     return board
 
 def print_board(board):
-    print('Getting the chess position...')
+    #print('Getting the chess position...')
     print('The chess position is now:')
     for j in range(8):
         print(8 - j, end='  ')
@@ -518,6 +518,8 @@ def do_inverse_kinematics(S, M, goal_T1in0):
     return theta
 
 def dragnot_demo(clientID, joint_handles, S, M):
+    os.system('cls')
+
     result, connector_handle = vrep.simxGetObjectHandle(clientID, 'BaxterGripper_attachPoint', vrep.simx_opmode_blocking)
     if result != vrep.simx_return_ok:
         raise Exception('could not get object handle')
@@ -541,22 +543,48 @@ def dragnot_demo(clientID, joint_handles, S, M):
         squares_pos.append(get_object_position(clientID, square))
     squares_pos = np.array(squares_pos)
 
+    print('DRAGNOT: CHESS-PLAYING ROBOT')
+    print('Hunter Huynh and Amitesh Srivastava')
+    print('ECE 470, Spring 2018, Introduction to Robotics, University of Illinois at Urbana-Champaign.\n')
+
+    print('What we did:')
+    print('Create a dynamic simulation in which the UR3 can move\nchess pieces corresponding to a given chess move.\n')
+
+    print('Why we did it:')
+    print('It\'s cool.\n')
+
+    print('Results:')
+    #print('Success!')
+
+    input('Success!')
+
+    os.system('cls')
+
+
     # Test locations
     i = 0
     locations = ['a2', 'b2', 'c2', 'd2', 'e2', 'f2', 'g2', 'h2', 'a1', 'b1', 'c1', 'd1', 'f1', 'g1', 'h1', 'a7', 'b7', 'c7', 'd7', 'e7', 'f7', 'g7', 'h7', 'a8', 'b8', 'c8', 'd8', 'f8', 'g8', 'h8']
     locations2 = ['a4', 'b4', 'c4', 'd4', 'e4', 'f4', 'g4', 'h4', 'a3', 'b3', 'c3', 'd3', 'f3', 'g3', 'h3', 'a5', 'b5', 'c5', 'd5', 'e5', 'f5', 'g5', 'h5', 'a6', 'b6', 'c6', 'd6', 'f6', 'g6', 'h6']
 
+
     user_input = True
     while True:
         if user_input:
-            print('\nDragnot\'s turn.')
+            os.system('cls')
+            print('\nRobot Dragnot\'s turn.')
+
+            board = get_chess_position(clientID, squares_pos)
+            print_board(board)
+
             print('\nInput a chess move')
-            pos = input(" Enter the start square (e.g. e2): ")
-            pos2 = input(" Enter the destination square (e.g. e4): ")
+            pos = input(" Enter start square (e.g. e2): ")
+            pos2 = input(" Enter destination square (e.g. e4): ")
         else:
             pos = locations[i]
             pos2 = locations2[i]
             i += 1
+
+        print("Attempting to execute move", pos, "-", pos2, end='...\n')
 
         # Go to piece at first position...
         goal_pose = get_object_pose(clientID, pos)
@@ -612,21 +640,19 @@ def dragnot_demo(clientID, joint_handles, S, M):
         theta_start = get_robot_configuration(clientID, joint_handles)
         smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
+        os.system('cls')
+        print('\nHuman\'s turn.\n')
+
         board = get_chess_position(clientID, squares_pos)
         print_board(board)
         prev_board = board
 
-        print('\nHuman\'s turn.\n')
-        print('Waiting for the human to move a piece on the board...',end='')
+        print('Waiting for the human to move a piece on the board...')
         while True:
-            time.sleep(1)
-            print(end='.')
-            sys.stdout.flush()
+            time.sleep(1.5)
             board = get_chess_position(clientID, squares_pos)
             if board != prev_board:
                 break
-
-        print_board(board)
 
 
 
@@ -771,9 +797,9 @@ vrep.simxStartSimulation(clientID, vrep.simx_opmode_oneshot)
 ################################################################################
 
 # Reset position to all zeros
-theta = [0, 0, 0, 0, 0, 0]
-theta_start = get_robot_configuration(clientID, joint_handles)
-smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
+#theta = [0, 0, 0, 0, 0, 0]
+#theta_start = get_robot_configuration(clientID, joint_handles)
+#smooth_place_robot_in_configuration(clientID, joint_handles, theta_start, theta)
 
 # Get array of all S's
 S = np.zeros((6, 6))
